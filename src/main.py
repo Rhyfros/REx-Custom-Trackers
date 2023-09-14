@@ -1,5 +1,5 @@
 """
-Hi i do the things that do the bot things
+This code parses and then sends the tracker to a new
 """
 
 
@@ -46,7 +46,7 @@ VALID_AUTHOR_IDS = ["967275823407173632", "967275686798716928", "967275962762932
 
 def parser(event_type, data) -> None:
     """
-    Parses the events and their data
+    Used to parse the events and their data
 
     Args:
         event_type (str): The string of the event type
