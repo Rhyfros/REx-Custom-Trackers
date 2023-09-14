@@ -53,8 +53,6 @@ def parser(event_type, data) -> None:
         data (dict | list): The data response from discord
     """
 
-    print(event_type)
-
     if event_type == "MESSAGE_CREATE":
         msg = MessageInfo.Message(message=data)
 
