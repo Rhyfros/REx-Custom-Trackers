@@ -9,13 +9,7 @@ import requests
 
 import discord_socket
 import MessageInfo
-from settings import TOKEN
-
-WEBHOOK_URL = (
-    "https://discord.com/api/webhooks/"
-    + "1149525012076843100/"
-    + "wHrpQ2IfK2iqPxFkDyuP02cx2U45S69DMJVR2VKkGBXClik3Vp7yNRCncqGTy0yXZwVo"
-)
+from settings import TOKEN, WEBHOOK_URL
 
 
 TIERS = {
