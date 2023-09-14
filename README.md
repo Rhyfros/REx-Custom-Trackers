@@ -78,9 +78,3 @@ Make sure to open your terminal/console of choice
 - Feel free to contact me with the source code and what you added and I will review it in my free time
 
 - If you have any improvements, suggestions, or constructive criticism feel free to send a message in the discord or DM me it# REx-Custom-Trackers
-# REx-Custom-Trackers
-# REx-Custom-Trackers
-# REx-Custom-Trackers
-# REx-Custom-Trackers
-# REx-Custom-Trackers
-# REx-Custom-Trackers
