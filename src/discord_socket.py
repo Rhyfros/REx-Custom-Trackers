@@ -1,12 +1,12 @@
 """
-discord_socket is a module for handling the Discord gateway API easily.
+Used to handle Discord gateway API easily.
 
-    Created by: Rhyfros
+Created by: Rhyfros
 """
 
+
+import asyncio
 import dataclasses
-import datetime
-import enum
 import functools
 import json
 import logging
@@ -18,29 +18,17 @@ import typing
 import websocket
 
 
-class ActivityType(enum.Enum):
-    """
-    Enum used for activity types
-    """
-
-    PLAYING = 0
-    IDK = 1
-    TEST = 2
-    WATCHING = 3
-    TEST2 = 4
-
-
 @dataclasses.dataclass()
 class DiscordSocketInfo:
     """
     Dataclass used for storing information for the DiscordSocket class
     """
 
-    data: dict
-    last_ack: float | None
-    last_hb: float
-    start_time: float
+    heartbeat_interval: float | int
     sequence: int
+    session_id: typing.Any
+    resume_gateway_url: str | None
+    last_hb: int | float | None
 
 
 @dataclasses.dataclass()
@@ -50,7 +38,6 @@ class DiscordSocketSetup:
     """
 
     token: str
-    activity: str
     parser: typing.Callable
 
 
@@ -67,14 +54,16 @@ class DiscordSocket:
         self.ds_setup = ds_setup
 
         self.ds_info = DiscordSocketInfo(
-            data={},
-            last_ack=datetime.datetime.now().timestamp(),
-            last_hb=datetime.datetime.now().timestamp(),
-            start_time=datetime.datetime.now().timestamp(),
+            last_hb=time.time(),
             sequence=0,
+            session_id=None,
+            resume_gateway_url=None,
+            heartbeat_interval=None,
         )
 
-        self.web_socket = self.get_web_socket_app(gateway=self.gateway)
+        self.web_socket: websocket.WebSocket = websocket.WebSocket()
+
+        # print("DiscordSocket initialized.")
 
         self.log(level=logging.DEBUG, msg="DiscordSocket initialized.")
 
@@ -88,6 +77,24 @@ class DiscordSocket:
         """
         return "wss://gateway.discord.gg/?v=10&encoding=json"
 
+    async def connect(self):
+        # print("Testing if connected")
+        if self.web_socket.connected is False:
+            # print("Connecting")
+
+            try:
+                if self.ds_info.resume_gateway_url is not None:
+                    self.web_socket.connect(url=self.ds_info.resume_gateway_url)
+
+                else:
+                    self.web_socket.connect(url=self.gateway)
+
+            except Exception as e:
+                self.log(logging.WARNING, f"Error reconnecting: {e}")
+                print(f"Error reconnecting: {e}")
+
+            # print("Connected")
+
     def log(self, level, msg) -> None:
         """
         Logs the given message (msg) at the given level.
@@ -97,282 +104,178 @@ class DiscordSocket:
             msg (str): The message to log.
         """
         if self._logger is not None:
-            self._logger.log(level=level, msg="[DiscordSocket_v1]" + msg)
+            self._logger.log(level=level, msg="[DiscordSocket_v1] " + msg)
 
-    def connect(self, web_socket: websocket.WebSocketApp) -> None:
+    async def on_message(self, msg) -> None:
         """
-        Connects to the Discord gateway API with the given websocket.WebSocketApp (web_socket)
+        Ran when the websocket receives a message.
 
         Args:
-            web_socket (websocket.WebSocketApp): The WebSocketApp to connect to.
-        """
-        self.log(level=logging.DEBUG, msg="Connecting.")
-        # print("Connecting...")
-
-        r_url = self.ds_info.data.get("resume_gateway_url", None)
-        if r_url is None:
-            r_url = self.gateway
-
-        if self.ds_info.data.get("session_id", None) is not None:
-            if self.ds_info.data.get("connected", None) is False:
-                web_socket.url = r_url
-
-            web_socket.send(
-                data=json.dumps(
-                    obj={
-                        "op": 6,
-                        "d": {
-                            "token": self.ds_setup.token,
-                            "session_id": self.ds_info.data["session_id"],
-                            "seq": self.ds_info.data.get("sequence", None),
-                        },
-                    }
-                )
-            )
-
-        else:
-            if self.ds_info.data.get("connected", None) is False:
-                web_socket.url = r_url
-
-            # print(self.ds_setup.activity)
-
-            web_socket.send(
-                data=json.dumps(
-                    obj={
-                        "op": 2,
-                        "d": {
-                            "token": self.ds_setup.token,
-                            "properties": {
-                                "os": "linux",
-                                "browser": "disco",
-                                "device": "disco",
-                            },
-                            "compress": True,
-                            "presence": {
-                                "activities": self.ds_setup.activity,
-                                "status": "online",
-                                "since": self.ds_info.start_time,
-                                "afk": False,
-                            },
-                        },
-                    }
-                )
-            )
-
-    def on_open(self) -> None:
-        """
-        Ran when the websocket.WebSocketApp opens.
-        """
-
-        self.log(level=logging.DEBUG, msg="Websocket opened.")
-
-    def on_error(self, msg: str | None) -> None:
-        """
-        Ran when the websocket.WebSocketApp receives an error.
-
-        Args:
-            msg (str | None): The error message received, if any.
-        """
-
-        self.log(level=logging.DEBUG, msg=f"Websocket received an error: {msg}")
-
-    def on_close(
-        self,
-        web_socket: websocket.WebSocketApp,
-        close_code: None | str | float | int,
-        close_msg: None | str,
-    ) -> None:
-        """
-        Ran when the websocket.WebSocketApp closes.
-
-        Args:
-            web_socket (websocket.WebSocketApp): The WebSocketApp that was closed
-            close_code (str | float | int | None): The close code received, if any.
-            close_msg (str | None): The close message received, if any.
-        """
-
-        self.log(
-            level=logging.WARNING,
-            msg="Websocket connection closed. "
-            + f"close_code: {close_code}, "
-            + f"close_msg: {close_msg}",
-        )
-
-        time.sleep(2.5)
-
-        self.connect(web_socket)
-
-    def on_message(self, web_socket: websocket.WebSocketApp, msg) -> None:
-        """
-        Ran when the websocket.WebSocketApp receives a message.
-
-        Args:
-            web_socket (websocket.WebSocketApp): The WebSocketApp that received a message.
+            web_socket (websocket.WebSocket): The websocket that received a message.
             msg (str): The JSON encoded message.
         """
 
         try:
             response = json.loads(msg)
-        except json.JSONDecodeError:
+        except Exception:
             response = {"op": -1}
         opcode = response["op"]
 
         match opcode:
             case 11:  # Heartbeat ACK
-                self.ds_info.last_ack = datetime.datetime.now().timestamp()
-                self.ds_info.data["sequence"] = self.ds_info.data.get("sequence", 0) + 1
-
-                if not self.ds_info.data.get("connected", False):
-                    self.ds_info.data["connected"] = True
-                    self.connect(web_socket)
+                # print("Heartbeat ACK")
+                self.ds_info.sequence = self.ds_info.sequence + 1
 
             case 10:  # Hello
-                self.ds_info.data["heartbeat_interval"] = (
+                self.log(
+                    logging.DEBUG,
+                    "Hello event received.",
+                )
+
+                self.ds_info.heartbeat_interval = (
                     response["d"]["heartbeat_interval"] / 1000
                 )
 
-            case 9:  # Invalid session
-                try:
-                    web_socket.close()
-                except websocket.WebSocketConnectionClosedException as exception:
-                    print("Socket close error:", exception, "\n")
-
-                self.ds_info.data["connected"] = False
-
-                self.connect(web_socket=web_socket)
-
-            case 7:  # Reconnect
-                try:
-                    web_socket.close()
-                except websocket.WebSocketConnectionClosedException as exception:
-                    print("Socket close error:", exception, "\n")
-
-                self.ds_info.data["connected"] = False
-
-                self.connect(web_socket=web_socket)
-
-            case 1:  # Heartbeat
-                web_socket.send(
-                    data=json.dumps(
-                        obj={"op": 1, "d": self.ds_info.data.get("sequence", None)}
+                self.web_socket.send(
+                    payload=json.dumps(
+                        obj={
+                            "op": 2,
+                            "d": {
+                                "token": self.ds_setup.token,
+                                "properties": {
+                                    "os": "linux",
+                                    "browser": "serve",
+                                    "device": "serve",
+                                },
+                            },
+                        }
                     )
                 )
-                self.ds_info.last_hb = datetime.datetime.now().timestamp()
+
+                self.ds_info.last_hb = time.time()
+
+            case 9:  # Invalid session
+                self.log(
+                    logging.WARNING,
+                    "Invalid session event received.",
+                )
+                self.log(logging.WARNING, "Invalid session.")
+
+            case 7:  # Reconnect
+                self.log(
+                    logging.DEBUG,
+                    "Reconnect event received.",
+                )
+
+                await self.connect()
+
+            case 1:  # Heartbeat
+                # print("Heartbeat")
+
+                self.web_socket.send(
+                    payload=json.dumps(obj={"op": 1, "d": self.ds_info.sequence})
+                )
+
+                self.ds_info.last_hb = time.time()
 
             case 0:  # Ready / Event
                 if response.get("t", None) is None:  # Ready
+                    self.log(
+                        logging.DEBUG,
+                        "Ready event received.",
+                    )
+
                     if "resume_gateway_url" in response:
-                        self.ds_info.data["resume_gateway_url"] = response["d"][
+                        self.ds_info.resume_gateway_url = response["d"][
                             "resume_gateway_url"
                         ]
 
                     if "session_id" in response:
-                        self.ds_info.data["session_id"] = response["d"]["session_id"]
+                        self.ds_info.session_id = response["d"]["session_id"]
 
                 else:  # Event
-                    event_type = response["t"]
-                    data: dict = response["d"]
+                    # print("Event")
+                    event_type: str = response["t"]
+                    data: typing.Any = response["d"]
 
-                    self.ds_setup.parser(event_type, data)
+                    asyncio.create_task(self.ds_setup.parser(event_type, data))
 
-    def get_web_socket_app(self, gateway) -> websocket.WebSocketApp:
-        """
-        Creates a new websocket.WebSocketApp with the given gateway.
-
-        Args:
-            gateway (str): The gateway websocket URL.
-
-        Returns:
-            websocket.WebSocketApp: The websocket app created.
-        """
-
-        headers = {
-            "Accept-Encoding": "gzip, deflate, br",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Cache-Control": "no-cache",
-            "Pragma": "no-cache",
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-            + "AppleWebKit/537.36 (KHTML, like Gecko) "
-            + "Chrome/116.0.0.0 Safari/537.36",
-        }
-
-        web_socket = websocket.WebSocketApp(
-            url=gateway,
-            header=headers,  # type: ignore
-            on_open=lambda _: self.on_open(),
-            on_message=lambda web_socket, msg: self.on_message(
-                web_socket=web_socket, msg=msg
-            ),
-            on_error=lambda _, msg: self.on_error(msg),
-            on_close=lambda web_socket, close_code, close_msg: self.on_close(
-                web_socket=web_socket, close_code=close_code, close_msg=close_msg
-            ),
+    def keep_alive(self):
+        self.log(
+            logging.DEBUG,
+            "Started keep_alive",
         )
-
-        self.log(level=logging.DEBUG, msg="Websocket app created.")
-
-        return web_socket
-
-    def update_presence(self, activity: list[dict], since: int | float) -> None:
-        """
-        Updates the users presence with the activity provided.
-
-        Args:
-            activity (list[dict]): List of dictionaries containing discord activity information.
-            since (float | int): The activity "since" parameter.
-        """
-
-        self.ds_setup.activity = activity
-
-        self.web_socket.send(
-            data=json.dumps(
-                obj={
-                    "op": 3,
-                    "d": {
-                        "since": since,
-                        "activities": activity,
-                        "status": "online",
-                        "afk": False,
-                    },
-                }
-            )
-        )
-
-        self.log(level=logging.DEBUG, msg="Presence updated.")
-
-    def keep_alive(self) -> None:
-        """
-        Keeps the socket connection alive.
-        """
+        # print("Keeping alive")
 
         while True:
-            wait_time = self.ds_info.data.get("heartbeat_interval", None)
+            wait_time = self.ds_info.heartbeat_interval
             if wait_time is not None:
-                wait_time *= random.uniform(0.1, 1)
-            else:
-                wait_time = 0.05
-            time.sleep(wait_time)
+                wait_time *= random.uniform(0.1, 0.9)
 
-            if self.ds_info.data.get("heartbeat_interval", None) is not None:
-                if self.ds_info.data.get("connected", True) is True:
-                    self.web_socket.send(
-                        data=json.dumps(
-                            obj={"op": 1, "d": self.ds_info.data.get("sequence", None)}
-                        )
+            time.sleep(0.05)
+
+            if wait_time is not None:
+                if self.web_socket.connected is True:
+                    if (time.time() - self.ds_info.last_hb) >= wait_time:
+                        # print("Past wait")
+
+                        try:
+                            self.web_socket.send(
+                                payload=json.dumps(
+                                    obj={"op": 1, "d": self.ds_info.sequence}
+                                )
+                            )
+
+                            self.log(
+                                logging.DEBUG,
+                                "Heartbeat sent",
+                            )
+
+                        except Exception as e:
+                            print("Error while sending heartbeat:", e)
+                            self.log(
+                                logging.ERROR,
+                                f"Error while sending hearbeat: {e}",
+                            )
+
+                        self.ds_info.last_hb = time.time()
+
+    async def receiver(self):
+        # print("Receiving")
+        while True:
+            await asyncio.sleep(0.025)
+
+            try:
+                if self.web_socket.connected is True:
+                    new_data = self.web_socket.recv()
+
+                    if new_data is not None:
+                        asyncio.create_task(self.on_message(new_data))  # New event
+
+                else:
+                    print("Websocket not connected, heatbeat not sendable.")
+                    self.log(
+                        logging.DEBUG,
+                        "Websocket not connected, heatbeat not sendable.",
                     )
 
-                    self.ds_info.last_hb = datetime.datetime.now().timestamp()
+                    await asyncio.sleep(10)
 
-    def run(self) -> None:
-        """
-        Main function to run the DiscordSocket
-        """
+                    if self.web_socket.connected is False:
+                        await self.connect()  # Reconnects to the Discord gateway
 
-        func_list = [
-            self.keep_alive,
-            lambda: self.web_socket.run_forever(ping_interval=10, ping_timeout=5),
-        ]
+            except Exception as e:
+                print("Receiver error:", e)
+                self.log(logging.ERROR, f"Receiver error: {e}")
 
-        for x in func_list:
-            t = threading.Thread(target=x)
-            t.start()
+    async def _start(self):
+        await self.connect()
+
+        threading.Thread(target=self.keep_alive).start()
+
+        await asyncio.get_event_loop().run_until_complete(
+            asyncio.create_task(self.receiver())
+        )
+
+    def start(self):
+        asyncio.gather(self._start())

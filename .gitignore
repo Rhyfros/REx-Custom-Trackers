@@ -1,12 +1,12 @@
 # Remove IDE files.
-.vscode
-.idea
+**/.vscode
+**.idea
 
 # Remote environment files.
-.env
+**/**.env
 
 # Remove DS_Store files.
-**/.DS_Store
+**/**.DS_Store
 
 
 # Remove compiled python files.
@@ -14,3 +14,6 @@
 
 # Remove logs.
 **/**.log
+
+# Remove db files.
+**/**.db
