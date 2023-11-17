@@ -5,11 +5,13 @@ Made by Rhyfros
 """
 
 import asyncio
+import json
 import logging
 import random
 import sqlite3
 
 import discord
+import discord.ext.commands.errors as pycord_errors
 import discord_socket
 import message_info
 from discord.ext import commands
@@ -29,7 +31,7 @@ TIERS = {
     "0": "Zenith",
 }
 
-TIER_RANKS = {
+TIER_RANKS_BY_INT = {
     "16744449": 1,
     "10092774": 2,
     "1955753": 3,
@@ -43,6 +45,32 @@ TIER_RANKS = {
     "0": 11,
 }
 
+TIER_RANKS_BY_STR = {
+    "Rare": 1,
+    "Master": 2,
+    "Surreal": 3,
+    "Mythic": 4,
+    "Exotic": 5,
+    "Exquisite": 6,
+    "Transcendent": 7,
+    "Enigmatic": 8,
+    "Unfathomable": 9,
+    "Otherworldly": 10,
+    "Zenith": 11,
+}
+
+TYPE_BY_CHANNEL_IDS = {
+    "967252613227769876": "NORMAL",
+    "967252672170299402": "IONIZED",
+    "967252684807749752": "SPECTRAL",
+}
+
+TYPE_INDEX = {"NORMAL": 0, "IONIZED": 1, "SPECTRAL": 2}
+
+with open("cave_ores.json", "r", encoding="utf-8") as cave_ores_json:
+    CAVE_ORES: dict = json.load(cave_ores_json)
+
+
 VALID_CHANNEL_IDS = ["967252613227769876", "967252672170299402", "967252684807749752"]
 VALID_AUTHOR_IDS = ["967275823407173632", "967275686798716928", "967275962762932244"]
 
@@ -55,6 +83,111 @@ def main():
     print("Starting main")
 
     # Parser
+    async def parse_sender(
+        ore_name: str,
+        base_rarity: int,
+        blocks_mined: int,
+        username: str,
+        tier: str,
+        ore_type: str,
+        world: str,
+        event: str,
+        pickaxe: str,
+        cave_type: str | None = None,
+    ):
+        ore_name = " ".join(ore_name) if isinstance(ore_name, list) else ore_name
+        text = (
+            "--------------------------------------------------"
+            + f"\n**{(ore_type.capitalize() + ' ' if ore_type != 'NORMAL' else '')}{' '.join(ore_name) if isinstance(ore_name, list) else ore_name}** "
+            + f"{('' if cave_type is None else '(' + str(cave_type) + ') ')}"
+            + f"has been found by **{username}** [**{tier}**]"
+            + f"\nWorld: {world}"
+            + f"\nBase Rarity: {base_rarity}"
+            + f"\nBlocks Mined: {blocks_mined}"
+            + f"\nPickaxe: {pickaxe}"
+            + f"\nEvent: {event}"
+            + (
+                f"\nAdjusted: {int(CAVE_ORES[str(cave_type)]['rarity'] * 1.88 * CAVE_ORES[str(cave_type)]['ores'][ore_name][TYPE_INDEX[ore_type]])}"
+                if (cave_type is not None and cave_type != "")
+                else ""
+            )
+            + "\n--------------------------------------------------"
+        )
+
+        tier_rank = TIER_RANKS_BY_STR.get(tier, -1)
+
+        db_cursor.execute(
+            """
+            SELECT * FROM "ChannelsPerGuild"
+            """
+        )
+        cselect = db_cursor.fetchall()
+
+        for guild_id, channel_id in cselect:
+            db_cursor.execute(
+                """
+                SELECT username FROM "PlayersPerGuild"
+                WHERE guild_id = ?
+                """,
+                (guild_id,),
+            )
+            playerselect = db_cursor.fetchall()
+            # print(pselect in [x[0] for x in pselect])
+            # print([x[0] for x in pselect])
+
+            if username.lower() in [x[0].lower() for x in playerselect]:
+                db_cursor.execute(
+                    """
+                    SELECT member_id FROM "PlayerPingPerMember"
+                    WHERE guild_id = ? AND username = ?
+                    """,
+                    (guild_id, username),
+                )
+                pingselect = db_cursor.fetchall()
+
+                db_cursor.execute(
+                    """
+                    SELECT global_message FROM "GlobalMessagePerGuild"
+                    WHERE guild_id = ?
+                    """,
+                    (guild_id,),
+                )
+                global_select = db_cursor.fetchall()
+
+                if len(global_select) > 0:
+                    if tier_rank is not None:
+                        if tier_rank >= 9:
+                            text = text + f"\n\n{global_select[0][0]}\n"
+
+                        elif tier_rank >= 7:
+                            if ore_type == "SPECTRAL":
+                                text = text + f"\n\n{global_select[0][0]}\n"
+
+                            elif (tier_rank >= 8) and (ore_type == "IONIZED"):
+                                text = text + f"\n\n{global_select[0][0]}\n"
+
+                if len(pingselect) > 0:
+                    print("Tracking")
+                    try:
+                        await bot_client.get_channel(channel_id).send(
+                            text
+                            + "\n"
+                            + "".join(["\n<@" + str(x[0]) + ">" for x in pingselect])
+                        )
+                        print("Tracked")
+                    except Exception as e:
+                        if isinstance(e, AttributeError):
+                            logger.log(f"Maybe remove this server idk? {e}")
+                        logger.log(logging.ERROR, f"Errored trying to send ping: {e}")
+
+                else:
+                    print("Tracking")
+                    try:
+                        await bot_client.get_channel(channel_id).send(text)
+                        print("Tracked")
+                    except Exception:
+                        pass
+
     async def parser(event_type, data) -> None:
         """
         Used to parse the events and their data
@@ -81,10 +214,18 @@ def main():
                     fields = embed_data["fields"]
 
                     username = title.split()[0]
+                    ore_type = TYPE_BY_CHANNEL_IDS.get(
+                        str(msg.message_data.channel_id), None
+                    )
+                    if ore_type is None:  # If failed
+                        print(msg.message_data.channel_id)
+
                     ore_name = (
-                        title.split("has found")[1]
-                        .replace(" an", "")
-                        .replace(" a", "")
+                        " ".join(
+                            title.split("has found")[1].split(" ")[
+                                (0 if ore_type == "NORMAL" else 1) :
+                            ]
+                        )
                         .strip()
                         .split(" (")[0]
                     )
@@ -96,49 +237,34 @@ def main():
                     else:
                         cave_type = None
 
-                    tier: str = TIERS.get(str(embed_data["color"]), "NOT FOUND?")
+                    tier: str = TIERS.get(str(embed_data["color"]), None)
 
                     base_rarity: str = fields[0]["value"].split()[0].replace("1/", "")
                     blocks_mined: str = fields[1]["value"]
                     pickaxe: str = fields[2]["value"]
                     event: str = fields[3]["value"]
 
-                    text = (
-                        "--------------------------------------------------"
-                        + f"\n**{str(ore_name[0]).upper() + str(ore_name[1:])}** "
-                        + f"{('' if cave_type is None else '(' + str(cave_type) + ') ')}"
-                        + f"has been found by **{username}** [**{tier}**]"
-                        + f"\nWorld: {world}"
-                        + f"\nBase Rarity: {base_rarity}"
-                        + f"\nBlocks Mined: {blocks_mined}"
-                        + f"\nPickaxe: {pickaxe}"
-                        + f"\nEvent: {event}"
-                        + "\n--------------------------------------------------"
+                    if ore_type != "NORMAL":
+                        ore_name = (
+                            title.split("has found")[1]
+                            .replace(" an", "")
+                            .replace(" a", "")
+                            .strip()
+                            .split(" (")[0]
+                        ).split()[1:]
+
+                    await parse_sender(
+                        ore_name=ore_name,
+                        base_rarity=base_rarity,
+                        blocks_mined=blocks_mined,
+                        pickaxe=pickaxe,
+                        event=event,
+                        tier=tier,
+                        username=username,
+                        world=(" ".join(world) if isinstance(world, list) else world),
+                        cave_type=cave_type,
+                        ore_type=ore_type,
                     )
-
-                    db_cursor.execute(
-                        """
-                        SELECT * FROM "ChannelsPerGuild"
-                        """
-                    )
-                    cselect = db_cursor.fetchall()
-
-                    for guild_id, channel_id in cselect:
-                        db_cursor.execute(
-                            """
-                            SELECT username FROM "PlayersPerGuild"
-                            WHERE guild_id = ?
-                            """,
-                            (guild_id,),
-                        )
-                        pselect = db_cursor.fetchall()
-                        # print(pselect in [x[0] for x in pselect])
-                        # print([x[0] for x in pselect])
-
-                        if username.lower() in [x[0].lower() for x in pselect]:
-                            print("Tracking")
-                            await bot_client.get_channel(channel_id).send(text)
-                            print("Tracked")
 
     # Setup SQL DB
     db_conn = sqlite3.connect("db_v1.db")
@@ -156,10 +282,29 @@ def main():
     )
     db_cursor.execute(
         """
+        CREATE TABLE IF NOT EXISTS "GlobalMessagePerGuild"
+        (
+            guild_id INTEGER,
+            global_message TEXT
+        )
+        """
+    )
+    db_cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS "ChannelsPerGuild"
         (
             guild_id INTEGER,
             channel_id INTEGER
+        )
+        """
+    )
+    db_cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS "PlayerPingPerMember"
+        (
+            username TEXT,
+            member_id INTEGER,
+            guild_id INTEGER
         )
         """
     )
@@ -168,12 +313,11 @@ def main():
 
     # Setup logger
     logger = logging.getLogger(name="logger")
-    logging.basicConfig(filename="log.log", filemode="a", level=logging.DEBUG)
+    logging.basicConfig(filename="log.log", filemode="a", level=logging.INFO)
 
     # Bot
     bot_client = discord.Bot()
 
-    @commands.cooldown(1, 1, commands.BucketType.member)
     @bot_client.slash_command(
         name="epinephrine",
         description="Nope...",
@@ -181,15 +325,15 @@ def main():
     async def _bot_scmd_epinephrine(
         ctx: discord.ApplicationContext,
     ):  # /epinephrine scmd
-        await ctx.response.defer()
         try:
+            await ctx.response.defer()
             random_int = random.randint(1, 999_999_999)
             if random_int == 1:
                 await ctx.followup.send(content="I am so sorry...\nRolled a 1.")
 
             elif random_int == 999_999_999:
                 await ctx.followup.send(
-                    "Money money kaching!\nJACKPOT!!!\nROLLED A 999,999,999"
+                    "Money money kaching!!!!!!!!!!!\nJACKPOT!!!\nROLLED A 999,999,999"
                 )
 
             else:
@@ -197,7 +341,179 @@ def main():
                     f"Did not roll epinephrine\nRolled: {random_int:,}"
                 )
 
-        except discord.errors.ApplicationCommandInvokeError:
+        except (
+            discord.errors.ApplicationCommandInvokeError,
+            discord.errors.NotFound,
+            pycord_errors.CommandOnCooldown,
+        ):
+            pass
+
+    @bot_client.slash_command(
+        name="unfathomable",
+        description="Probably not...",
+    )
+    async def _bot_scmd_unfathomable(
+        ctx: discord.ApplicationContext,
+    ):  # /unfathomable scmd
+        try:
+            await ctx.response.defer()
+            random_int = random.randint(1, 100_000_000)
+            if random_int == 1:
+                await ctx.followup.send(content="I quite sorry.\nRolled a 1.")
+
+            elif random_int == 100_000_000:
+                await ctx.followup.send("Money money!!\nEASY!!!\nROLLED A 100,000,000")
+
+            else:
+                await ctx.followup.send(
+                    f"Did not roll unfathomable\nRolled: {random_int:,}"
+                )
+
+        except (
+            discord.errors.ApplicationCommandInvokeError,
+            discord.errors.NotFound,
+            pycord_errors.CommandOnCooldown,
+        ):
+            pass
+
+    @bot_client.slash_command(
+        name="enigmatic",
+        description="Maybe...",
+    )
+    async def _bot_scmd_enigmatic(
+        ctx: discord.ApplicationContext,
+    ):  # /enigmatic scmd
+        try:
+            await ctx.response.defer()
+            random_int = random.randint(1, 50_000_000)
+            if random_int == 1:
+                await ctx.followup.send(content="I a bit sorry...\nRolled a 1.")
+
+            elif random_int == 50_000_000:
+                await ctx.followup.send(
+                    "Money money kaching!\nJACKPOT!!!\nROLLED A 50,000,000"
+                )
+
+            else:
+                await ctx.followup.send(
+                    f"Did not roll enigmatic\nRolled: {random_int:,}"
+                )
+
+        except (
+            discord.errors.ApplicationCommandInvokeError,
+            discord.errors.NotFound,
+            pycord_errors.CommandOnCooldown,
+        ):
+            pass
+
+    @bot_client.slash_command(
+        name="transcendent",
+        description="Maybe...",
+    )
+    async def _bot_scmd_transcendent(
+        ctx: discord.ApplicationContext,
+    ):  # /transcendent scmd
+        try:
+            await ctx.response.defer()
+            random_int = random.randint(1, 15_000_001)
+            if random_int == 1:
+                await ctx.followup.send(content="I not that sorry...\nRolled a 1.")
+
+            elif random_int == 15_000_001:
+                await ctx.followup.send("Money!\nJACKPOT!!!\nROLLED A 15,000,001")
+
+            else:
+                await ctx.followup.send(
+                    f"Did not roll transcendent\nRolled: {random_int:,}"
+                )
+
+        except (
+            discord.errors.ApplicationCommandInvokeError,
+            discord.errors.NotFound,
+            pycord_errors.CommandOnCooldown,
+        ):
+            pass
+
+    @bot_client.slash_command(
+        name="exquisite",
+        description="Maybe...",
+    )
+    async def _bot_scmd_exquisite(
+        ctx: discord.ApplicationContext,
+    ):  # /exquisite scmd
+        try:
+            await ctx.response.defer()
+            random_int = random.randint(1, 7_500_000)
+            if random_int == 1:
+                await ctx.followup.send(content="R.I.P. I guess...\nRolled a 1.")
+
+            elif random_int == 7_500_000:
+                await ctx.followup.send(
+                    "asdfghjkl\nInstantly cool with this one trick!\nROLLED A 7,500,000"
+                )
+
+            else:
+                await ctx.followup.send(
+                    f"Did not roll exquisite\nRolled: {random_int:,}"
+                )
+
+        except (
+            discord.errors.ApplicationCommandInvokeError,
+            discord.errors.NotFound,
+            pycord_errors.CommandOnCooldown,
+        ):
+            pass
+
+    @bot_client.slash_command(
+        name="exotic",
+        description="Maybe...",
+    )
+    async def _bot_scmd_exotic(
+        ctx: discord.ApplicationContext,
+    ):  # /exotic scmd
+        try:
+            await ctx.response.defer()
+            random_int = random.randint(1, 1_000_000)
+            if random_int == 1:
+                await ctx.followup.send(content="Not cool dude...\nRolled a 1.")
+
+            elif random_int == 1_000_000:
+                await ctx.followup.send("Cool\nDing ding ding!\nROLLED A 1,000,000")
+
+            else:
+                await ctx.followup.send(f"Did not roll exotic\nRolled: {random_int:,}")
+
+        except (
+            discord.errors.ApplicationCommandInvokeError,
+            discord.errors.NotFound,
+            pycord_errors.CommandOnCooldown,
+        ):
+            pass
+
+    @bot_client.slash_command(
+        name="infinite_roll",
+        description="IDK...",
+    )
+    async def _bot_scmd_infinite_roll(
+        ctx: discord.ApplicationContext,
+    ):  # /infinite_roll scmd
+        try:
+            await ctx.response.defer()
+            integer = 1
+
+            while True:
+                if random.randint(1, 2) == 2:
+                    integer *= 2
+                else:
+                    break
+
+            await ctx.followup.send(f"Rolled: {integer:,}")
+
+        except (
+            discord.errors.ApplicationCommandInvokeError,
+            discord.errors.NotFound,
+            pycord_errors.CommandOnCooldown,
+        ):
             pass
 
     @commands.cooldown(5, 60, commands.BucketType.member)
@@ -213,37 +529,53 @@ def main():
                 await ctx.response.defer()
                 try:
                     if (len(channel_id) <= 20) and (len(channel_id) >= 10):
-                        db_cursor.execute(
-                            """
-                            DELETE FROM "ChannelsPerGuild"
-                            WHERE guild_id = ?
-                            """,
-                            (ctx.guild_id,),
-                        )
-                        db_cursor.execute(
-                            """
-                            INSERT INTO "ChannelsPerGuild"
-                            (
-                                guild_id,
-                                channel_id
+                        if int(channel_id) in [int(x.id) for x in ctx.guild.channels]:
+                            db_cursor.execute(
+                                """
+                                DELETE FROM "ChannelsPerGuild"
+                                WHERE guild_id = ?
+                                """,
+                                (ctx.guild_id,),
                             )
-                            VALUES
-                            (
-                                ?,
-                                ?
+                            db_cursor.execute(
+                                """
+                                INSERT INTO "ChannelsPerGuild"
+                                (
+                                    guild_id,
+                                    channel_id
+                                )
+                                VALUES
+                                (
+                                    ?,
+                                    ?
+                                )
+                                """,
+                                (
+                                    ctx.guild_id,
+                                    int(channel_id),
+                                ),
                             )
-                            """,
-                            (ctx.guild_id, int(channel_id)),
-                        )
 
-                        db_conn.commit()
+                            db_conn.commit()
 
-                        try:
-                            await ctx.followup.send(
-                                content="Changed tracker channel in DB"
-                            )
-                        except Exception as e:
-                            print(f"Failed sending finalizer for add_to_tracker: {e}")
+                            try:
+                                await ctx.followup.send(
+                                    content="Changed tracker channel in DB"
+                                )
+                            except Exception as e:
+                                print(
+                                    f"Failed sending finalizer for add_to_tracker: {e}"
+                                )
+
+                        else:
+                            try:
+                                await ctx.followup.send(
+                                    content="That channel isn't in your server."
+                                )
+                            except Exception as e:
+                                print(
+                                    f"Failed sending finalizer for add_to_tracker: {e}"
+                                )
 
                     else:
                         try:
@@ -256,28 +588,31 @@ def main():
                                 e,
                             )
 
-                        db_cursor.execute(
-                            """
-                            DELETE * FROM "ChannelsPerGuild"
-                            WHERE guild_id = ?
-                            """,
-                            (ctx.guild_id,),
-                        )
-                        db_cursor.execute(
-                            """
-                            INSERT INTO "ChannelsPerGuild"
-                            (
-                                guild_id,
-                                channel_id
+                            db_cursor.execute(
+                                """
+                                DELETE FROM "ChannelsPerGuild"
+                                WHERE guild_id = ?
+                                """,
+                                (ctx.guild_id,),
                             )
-                            VALUES
-                            (
-                                ?,
-                                ?
+                            db_cursor.execute(
+                                """
+                                INSERT INTO "ChannelsPerGuild"
+                                (
+                                    guild_id,
+                                    channel_id
+                                )
+                                VALUES
+                                (
+                                    ?,
+                                    ?
+                                )
+                                """,
+                                (
+                                    ctx.guild_id,
+                                    int(channel_id),
+                                ),
                             )
-                            """,
-                            (ctx.guild_id, int(channel_id)),
-                        )
 
                         db_conn.commit()
 
@@ -288,8 +623,12 @@ def main():
                     print("Failed adding to database:", e)
                     await ctx.followup.send(content="Failed adding player to DB")
 
-        except discord.errors.ApplicationCommandInvokeError:
-            await ctx.followup.send(content="On cooldown")
+        except (
+            discord.errors.ApplicationCommandInvokeError,
+            discord.errors.NotFound,
+            pycord_errors.CommandOnCooldown,
+        ):
+            pass
 
     @commands.cooldown(10, 60, commands.BucketType.guild)
     @bot_client.slash_command(
@@ -367,8 +706,12 @@ def main():
                     print("Failed adding to database:", e)
                     await ctx.followup.send(content="Failed adding player to DB")
 
-        except discord.errors.ApplicationCommandInvokeError:
-            await ctx.followup.send(content="On cooldown")
+        except (
+            discord.errors.ApplicationCommandInvokeError,
+            discord.errors.NotFound,
+            pycord_errors.CommandOnCooldown,
+        ):
+            pass
 
     @commands.cooldown(10, 60, commands.BucketType.guild)
     @bot_client.slash_command(
@@ -411,8 +754,12 @@ def main():
                     print("Failed removing from database:", e)
                     await ctx.followup.send(content="Failed removing player from DB")
 
-        except discord.errors.ApplicationCommandInvokeError:
-            await ctx.followup.send(content="On cooldown")
+        except (
+            discord.errors.ApplicationCommandInvokeError,
+            discord.errors.NotFound,
+            pycord_errors.CommandOnCooldown,
+        ):
+            pass
 
     @commands.cooldown(10, 60, commands.BucketType.guild)
     @bot_client.slash_command(
@@ -436,7 +783,9 @@ def main():
 
                     selection = db_cursor.fetchall()
 
-                    await ctx.followup.send("\n".join([x[1] for x in selection]))
+                    await ctx.followup.send(
+                        "\n".join(sorted([x[1] for x in selection]))
+                    )
 
                 except Exception as e:
                     logger.log(
@@ -448,8 +797,230 @@ def main():
                         content="Failed to either fetch or respond to discord."
                     )
 
-        except discord.errors.ApplicationCommandInvokeError:
-            await ctx.followup.send(content="On cooldown")
+        except (
+            discord.errors.ApplicationCommandInvokeError,
+            discord.errors.NotFound,
+            pycord_errors.CommandOnCooldown,
+        ):
+            pass
+
+    @commands.cooldown(10, 60, commands.BucketType.member)
+    @bot_client.slash_command(
+        name="change_ping",
+        description="Changes what username you get pinged with in the tracker.",
+    )
+    async def _bot_scmd_change_ping(
+        ctx: discord.ApplicationContext, username: str
+    ):  # /change_ping scmd
+        try:
+            await ctx.response.defer()
+            try:
+                db_cursor.execute(
+                    """
+                    DELETE FROM "PlayerPingPerMember"
+                    WHERE member_id = ? AND guild_id = ?
+                    """,
+                    (ctx.author.id, ctx.guild_id),
+                )
+                db_cursor.execute(
+                    """
+                    INSERT INTO "PlayerPingPerMember"
+                    (            
+                        username,
+                        member_id,
+                        guild_id
+                    )
+                    VALUES
+                    (
+                        ?,
+                        ?,
+                        ?
+                    )
+                    """,
+                    (username, ctx.author.id, ctx.guild_id),
+                )
+
+                db_conn.commit()
+
+                await ctx.followup.send("Successfully edited the DB")
+
+            except Exception as e:
+                logger.log(
+                    logging.ERROR,
+                    f"Failed to edit DB or had API issues: {e}",
+                )
+                print(e)
+                await ctx.followup.send(content="Failed to edit DB or had API issues.")
+
+        except (
+            discord.errors.ApplicationCommandInvokeError,
+            discord.errors.NotFound,
+            pycord_errors.CommandOnCooldown,
+        ):
+            pass
+
+    @commands.cooldown(4, 60, commands.BucketType.member)
+    @bot_client.slash_command(
+        name="remove_ping",
+        description="Removes username for user_id in the pings in the tracker.",
+    )
+    async def _bot_scmd_remove_ping(
+        ctx: discord.ApplicationContext, member_id: str
+    ):  # /check_tracked_usernames scmd
+        try:
+            await ctx.response.defer()
+            if (ctx.author.guild_permissions.administrator is True) or (
+                ctx.author.id == member_id
+            ):
+                try:
+                    db_cursor.execute(
+                        """
+                        DELETE FROM "PlayerPingPerMember"
+                        WHERE member_id = ? AND guild_id = ?
+                        """,
+                        (int(member_id), ctx.guild_id),
+                    )
+
+                    db_conn.commit()
+
+                    await ctx.followup.send("Successfully edited the DB")
+
+                except Exception as e:
+                    logger.log(
+                        logging.ERROR,
+                        f"Failed to edit DB or had API issues: {e}",
+                    )
+                    print(e)
+                    await ctx.respond(content="Failed to edit DB or had API issues.")
+
+        except (
+            discord.errors.ApplicationCommandInvokeError,
+            discord.errors.NotFound,
+            pycord_errors.CommandOnCooldown,
+        ):
+            pass
+
+    @commands.cooldown(10, 60, commands.BucketType.guild)
+    @bot_client.slash_command(
+        name="change_global_message",
+        description="Changes global message for the server.",
+    )
+    async def _bot_scmd_change_global_message(
+        ctx: discord.ApplicationContext, global_message: str
+    ):  # /change_global_message scmd
+        try:
+            await ctx.response.defer()
+            if ctx.author.guild_permissions.administrator is True:
+                try:
+                    db_cursor.execute(
+                        """
+                        DELETE FROM "GlobalMessagePerGuild"
+                        WHERE guild_id = ?
+                        """,
+                        (ctx.guild_id,),
+                    )
+                    db_cursor.execute(
+                        """
+                        INSERT INTO "GlobalMessagePerGuild"
+                        (
+                            guild_id,
+                            global_message
+                        )
+                        VALUES
+                        (
+                            ?,
+                            ?
+                        )
+                        """,
+                        (ctx.guild_id, global_message),
+                    )
+
+                    db_conn.commit()
+
+                    await ctx.followup.send("Updated")
+
+                except Exception as e:
+                    logger.log(
+                        logging.ERROR,
+                        f"Failed to either fetch or respond to discord: {e}",
+                    )
+                    print("Failed to either fetch or respond to discord:", e)
+                    await ctx.followup.send(
+                        content="Failed to either update or respond to discord."
+                    )
+
+        except (
+            discord.errors.ApplicationCommandInvokeError,
+            discord.errors.NotFound,
+            pycord_errors.CommandOnCooldown,
+        ):
+            pass
+
+    @bot_client.slash_command(
+        name="manual_track",
+        description="Manually tracks an ore. (DEVELOPER ONLY)",
+    )
+    async def _bot_scmd_manual_track(
+        ctx: discord.ApplicationContext,
+        ore_name: str,
+        base_rarity: int,
+        blocks_mined: int,
+        username: str,
+        tier: discord.Option(
+            str,
+            "Enter a tier",
+            choices=[
+                "Rare",
+                "Master",
+                "Surreal",
+                "Mythic",
+                "Exotic",
+                "Exquisite",
+                "Transcendent",
+                "Enigmatic",
+                "Unfathomable",
+                "Otherworldly",
+                "Zenith",
+            ],
+        ),
+        ore_type: discord.Option(
+            str,
+            "Enter a type",
+            choices=[
+                "NORMAL",
+                "IONIZED",
+                "SPECTRAL",
+            ],
+        ),
+        world: str,
+        event: str,
+        pickaxe: str,
+        cave_type: str | None = None,
+    ):  # /manual_track scmd
+        try:
+            await ctx.response.defer()
+            # print(str(ctx.author.id))
+            if str(ctx.author.id) == "666960905224978463":
+                await ctx.followup.send("Sending")
+                await parse_sender(
+                    ore_name=ore_name,
+                    base_rarity=base_rarity,
+                    blocks_mined=blocks_mined,
+                    username=username,
+                    tier=tier,
+                    ore_type=ore_type,
+                    world=world,
+                    event=event,
+                    pickaxe=pickaxe,
+                    cave_type=cave_type,
+                )
+
+        except (
+            discord.errors.ApplicationCommandInvokeError,
+            discord.errors.NotFound,
+            pycord_errors.CommandOnCooldown,
+        ):
+            pass
 
     # Setup client
     ds_setup = discord_socket.DiscordSocketSetup(token=TOKEN, parser=parser)

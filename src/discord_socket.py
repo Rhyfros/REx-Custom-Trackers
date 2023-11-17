@@ -128,7 +128,7 @@ class DiscordSocket:
 
             case 10:  # Hello
                 self.log(
-                    logging.DEBUG,
+                    logging.INFO,
                     "Hello event received.",
                 )
 
@@ -159,11 +159,10 @@ class DiscordSocket:
                     logging.WARNING,
                     "Invalid session event received.",
                 )
-                self.log(logging.WARNING, "Invalid session.")
 
             case 7:  # Reconnect
                 self.log(
-                    logging.DEBUG,
+                    logging.INFO,
                     "Reconnect event received.",
                 )
 
@@ -181,7 +180,7 @@ class DiscordSocket:
             case 0:  # Ready / Event
                 if response.get("t", None) is None:  # Ready
                     self.log(
-                        logging.DEBUG,
+                        logging.INFO,
                         "Ready event received.",
                     )
 
@@ -255,7 +254,7 @@ class DiscordSocket:
                 else:
                     print("Websocket not connected, heatbeat not sendable.")
                     self.log(
-                        logging.DEBUG,
+                        logging.WARNING,
                         "Websocket not connected, heatbeat not sendable.",
                     )
 
