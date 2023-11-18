@@ -96,18 +96,19 @@ def main():
         cave_type: str | None = None,
     ):
         ore_name = " ".join(ore_name) if isinstance(ore_name, list) else ore_name
+
         text = (
             "--------------------------------------------------"
             + f"\n**{(ore_type.capitalize() + ' ' if ore_type != 'NORMAL' else '')}{' '.join(ore_name) if isinstance(ore_name, list) else ore_name}** "
             + f"{('' if cave_type is None else '(' + str(cave_type) + ') ')}"
             + f"has been found by **{username}** [**{tier}**]"
             + f"\nWorld: {world}"
-            + f"\nBase Rarity: {base_rarity}"
-            + f"\nBlocks Mined: {blocks_mined}"
+            + f"\nBase Rarity: {base_rarity:,}"
+            + f"\nBlocks Mined: {blocks_mined:,}"
             + f"\nPickaxe: {pickaxe}"
             + f"\nEvent: {event}"
             + (
-                f"\nAdjusted: {int(CAVE_ORES[str(cave_type)]['rarity'] * 1.88 * CAVE_ORES[str(cave_type)]['ores'][ore_name][TYPE_INDEX[ore_type]])}"
+                f"\nAdjusted: {int(CAVE_ORES[str(cave_type)]['rarity'] * 1.88 * (CAVE_ORES[str(cave_type)]['ores'][ore_name][TYPE_INDEX[ore_type]]) if cave_type != 'Gilded Cave' else base_rarity):,}"
                 if (cave_type is not None and cave_type != "")
                 else ""
             )
@@ -177,7 +178,9 @@ def main():
                         print("Tracked")
                     except Exception as e:
                         if isinstance(e, AttributeError):
-                            logger.log(f"Maybe remove this server idk? {e}")
+                            logger.log(
+                                logging.WARNING, f"Maybe remove this server idk? {e}"
+                            )
                         logger.log(logging.ERROR, f"Errored trying to send ping: {e}")
 
                 else:
@@ -239,8 +242,10 @@ def main():
 
                     tier: str = TIERS.get(str(embed_data["color"]), None)
 
-                    base_rarity: str = fields[0]["value"].split()[0].replace("1/", "")
-                    blocks_mined: str = fields[1]["value"]
+                    base_rarity: int = int(
+                        fields[0]["value"].split()[0].replace("1/", "").replace(",", "")
+                    )
+                    blocks_mined: int = int(fields[1]["value"].replace(",", ""))
                     pickaxe: str = fields[2]["value"]
                     event: str = fields[3]["value"]
 
@@ -313,7 +318,12 @@ def main():
 
     # Setup logger
     logger = logging.getLogger(name="logger")
-    logging.basicConfig(filename="log.log", filemode="a", level=logging.INFO)
+    logging.basicConfig(
+        filename="log.log",
+        filemode="a",
+        level=logging.INFO,
+        format="%(asctime)s;%(levelname)s;%(message)s",
+    )
 
     # Bot
     bot_client = discord.Bot()
@@ -326,7 +336,7 @@ def main():
         ctx: discord.ApplicationContext,
     ):  # /epinephrine scmd
         try:
-            await ctx.response.defer()
+            await ctx.defer()
             random_int = random.randint(1, 999_999_999)
             if random_int == 1:
                 await ctx.followup.send(content="I am so sorry...\nRolled a 1.")
@@ -356,7 +366,7 @@ def main():
         ctx: discord.ApplicationContext,
     ):  # /unfathomable scmd
         try:
-            await ctx.response.defer()
+            await ctx.defer()
             random_int = random.randint(1, 100_000_000)
             if random_int == 1:
                 await ctx.followup.send(content="I quite sorry.\nRolled a 1.")
@@ -384,7 +394,7 @@ def main():
         ctx: discord.ApplicationContext,
     ):  # /enigmatic scmd
         try:
-            await ctx.response.defer()
+            await ctx.defer()
             random_int = random.randint(1, 50_000_000)
             if random_int == 1:
                 await ctx.followup.send(content="I a bit sorry...\nRolled a 1.")
@@ -414,7 +424,7 @@ def main():
         ctx: discord.ApplicationContext,
     ):  # /transcendent scmd
         try:
-            await ctx.response.defer()
+            await ctx.defer()
             random_int = random.randint(1, 15_000_001)
             if random_int == 1:
                 await ctx.followup.send(content="I not that sorry...\nRolled a 1.")
@@ -442,7 +452,7 @@ def main():
         ctx: discord.ApplicationContext,
     ):  # /exquisite scmd
         try:
-            await ctx.response.defer()
+            await ctx.defer()
             random_int = random.randint(1, 7_500_000)
             if random_int == 1:
                 await ctx.followup.send(content="R.I.P. I guess...\nRolled a 1.")
@@ -472,7 +482,7 @@ def main():
         ctx: discord.ApplicationContext,
     ):  # /exotic scmd
         try:
-            await ctx.response.defer()
+            await ctx.defer()
             random_int = random.randint(1, 1_000_000)
             if random_int == 1:
                 await ctx.followup.send(content="Not cool dude...\nRolled a 1.")
@@ -498,7 +508,7 @@ def main():
         ctx: discord.ApplicationContext,
     ):  # /infinite_roll scmd
         try:
-            await ctx.response.defer()
+            await ctx.defer()
             integer = 1
 
             while True:
@@ -526,7 +536,7 @@ def main():
     ):  # /change_tracker_channel scmd
         try:
             if ctx.author.guild_permissions.administrator is True:
-                await ctx.response.defer()
+                await ctx.defer()
                 try:
                     if (len(channel_id) <= 20) and (len(channel_id) >= 10):
                         if int(channel_id) in [int(x.id) for x in ctx.guild.channels]:
@@ -640,7 +650,7 @@ def main():
     ):  # /add_to_tracker scmd
         try:
             if ctx.author.guild_permissions.administrator is True:
-                await ctx.response.defer()
+                await ctx.defer()
                 try:
                     db_cursor.execute(
                         """
@@ -723,7 +733,7 @@ def main():
     ):  # /remove_from_tracker scmd
         try:
             if ctx.author.guild_permissions.administrator is True:
-                await ctx.response.defer()
+                await ctx.defer()
                 try:
                     if (len(username) <= 20) and (len(username) >= 3):
                         db_cursor.execute(
@@ -771,7 +781,7 @@ def main():
     ):  # /check_tracked_usernames scmd
         try:
             if ctx.author.guild_permissions.administrator is True:
-                await ctx.response.defer()
+                await ctx.defer()
                 try:
                     db_cursor.execute(
                         """
@@ -813,7 +823,7 @@ def main():
         ctx: discord.ApplicationContext, username: str
     ):  # /change_ping scmd
         try:
-            await ctx.response.defer()
+            await ctx.defer()
             try:
                 db_cursor.execute(
                     """
@@ -868,7 +878,7 @@ def main():
         ctx: discord.ApplicationContext, member_id: str
     ):  # /check_tracked_usernames scmd
         try:
-            await ctx.response.defer()
+            await ctx.defer()
             if (ctx.author.guild_permissions.administrator is True) or (
                 ctx.author.id == member_id
             ):
@@ -909,7 +919,7 @@ def main():
         ctx: discord.ApplicationContext, global_message: str
     ):  # /change_global_message scmd
         try:
-            await ctx.response.defer()
+            await ctx.defer()
             if ctx.author.guild_permissions.administrator is True:
                 try:
                     db_cursor.execute(
@@ -998,7 +1008,7 @@ def main():
         cave_type: str | None = None,
     ):  # /manual_track scmd
         try:
-            await ctx.response.defer()
+            await ctx.defer()
             # print(str(ctx.author.id))
             if str(ctx.author.id) == "666960905224978463":
                 await ctx.followup.send("Sending")
