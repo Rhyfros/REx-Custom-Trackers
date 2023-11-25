@@ -125,6 +125,8 @@ def main():
         cselect = db_cursor.fetchall()
 
         for guild_id, channel_id in cselect:
+            this_text = text
+            print(guild_id)
             db_cursor.execute(
                 """
                 SELECT username FROM "PlayersPerGuild"
@@ -133,8 +135,6 @@ def main():
                 (guild_id,),
             )
             playerselect = db_cursor.fetchall()
-            # print(pselect in [x[0] for x in pselect])
-            # print([x[0] for x in pselect])
 
             if username.lower() in [x[0].lower() for x in playerselect]:
                 db_cursor.execute(
@@ -155,23 +155,25 @@ def main():
                 )
                 global_select = db_cursor.fetchall()
 
+                print(global_select)
+
                 if len(global_select) > 0:
                     if tier_rank is not None:
                         if tier_rank >= 9:
-                            text = text + f"\n\n{global_select[0][0]}\n"
+                            this_text = this_text + f"\n\n{global_select[0][0]}\n"
 
                         elif tier_rank >= 7:
                             if ore_type == "SPECTRAL":
-                                text = text + f"\n\n{global_select[0][0]}\n"
+                                this_text = this_text + f"\n\n{global_select[0][0]}\n"
 
                             elif (tier_rank >= 8) and (ore_type == "IONIZED"):
-                                text = text + f"\n\n{global_select[0][0]}\n"
+                                this_text = this_text + f"\n\n{global_select[0][0]}\n"
 
                 if len(pingselect) > 0:
                     print("Tracking")
                     try:
                         await bot_client.get_channel(channel_id).send(
-                            text
+                            this_text
                             + "\n"
                             + "".join(["\n<@" + str(x[0]) + ">" for x in pingselect])
                         )
@@ -243,7 +245,12 @@ def main():
                     tier: str = TIERS.get(str(embed_data["color"]), None)
 
                     base_rarity: int = int(
-                        fields[0]["value"].split()[0].replace("1/", "").replace(",", "")
+                        float(
+                            fields[0]["value"]
+                            .split()[0]
+                            .replace("1/", "")
+                            .replace(",", "")
+                        )
                     )
                     blocks_mined: int = int(fields[1]["value"].replace(",", ""))
                     pickaxe: str = fields[2]["value"]
