@@ -12,9 +12,10 @@ import sqlite3
 
 import discord
 import discord.ext.commands.errors as pycord_errors
+from discord.ext import commands
+
 import discord_socket
 import message_info
-from discord.ext import commands
 from settings import BOT_TOKEN, TOKEN
 
 TIERS = {
@@ -126,7 +127,7 @@ def main():
 
         for guild_id, channel_id in cselect:
             this_text = text
-            print(guild_id)
+
             db_cursor.execute(
                 """
                 SELECT username FROM "PlayersPerGuild"
@@ -155,8 +156,6 @@ def main():
                 )
                 global_select = db_cursor.fetchall()
 
-                print(global_select)
-
                 if len(global_select) > 0:
                     if tier_rank is not None:
                         if tier_rank >= 9:
@@ -172,12 +171,27 @@ def main():
                 if len(pingselect) > 0:
                     print("Tracking")
                     try:
-                        await bot_client.get_channel(channel_id).send(
-                            this_text
-                            + "\n"
-                            + "".join(["\n<@" + str(x[0]) + ">" for x in pingselect])
-                        )
-                        print("Tracked")
+                        s_channel = bot_client.get_channel(channel_id)
+                        if s_channel is not None:
+                            await s_channel.send(
+                                this_text
+                                + "\n"
+                                + "".join(
+                                    ["\n<@" + str(x[0]) + ">" for x in pingselect]
+                                )
+                            )
+                            print("Tracked")
+
+                        else:
+                            logger.log(logging.INFO, f"Removing channel: {channel_id}")
+
+                            db_cursor.execute(
+                                """
+                                DELETE FROM "ChannelsPerGuild"
+                                WHERE channel_id = ? AND guild_id = ?
+                                """,
+                                (channel_id, guild_id),
+                            )
                     except Exception as e:
                         if isinstance(e, AttributeError):
                             logger.log(
@@ -188,8 +202,22 @@ def main():
                 else:
                     print("Tracking")
                     try:
-                        await bot_client.get_channel(channel_id).send(text)
-                        print("Tracked")
+                        s_channel = bot_client.get_channel(channel_id)
+                        if s_channel is not None:
+                            await s_channel.send(this_text)
+                            print("Tracked")
+
+                        else:
+                            logger.log(logging.INFO, f"Removing channel: {channel_id}")
+
+                            db_cursor.execute(
+                                """
+                                DELETE FROM "ChannelsPerGuild"
+                                WHERE channel_id = ? AND guild_id = ?
+                                """,
+                                (channel_id, guild_id),
+                            )
+
                     except Exception:
                         pass
 
@@ -929,32 +957,38 @@ def main():
             await ctx.defer()
             if ctx.author.guild_permissions.administrator is True:
                 try:
-                    db_cursor.execute(
-                        """
-                        DELETE FROM "GlobalMessagePerGuild"
-                        WHERE guild_id = ?
-                        """,
-                        (ctx.guild_id,),
-                    )
-                    db_cursor.execute(
-                        """
-                        INSERT INTO "GlobalMessagePerGuild"
-                        (
-                            guild_id,
-                            global_message
+                    if len(global_message) < 100:
+                        db_cursor.execute(
+                            """
+                            DELETE FROM "GlobalMessagePerGuild"
+                            WHERE guild_id = ?
+                            """,
+                            (ctx.guild_id,),
                         )
-                        VALUES
-                        (
-                            ?,
-                            ?
+                        db_cursor.execute(
+                            """
+                            INSERT INTO "GlobalMessagePerGuild"
+                            (
+                                guild_id,
+                                global_message
+                            )
+                            VALUES
+                            (
+                                ?,
+                                ?
+                            )
+                            """,
+                            (ctx.guild_id, global_message),
                         )
-                        """,
-                        (ctx.guild_id, global_message),
-                    )
 
-                    db_conn.commit()
+                        db_conn.commit()
 
-                    await ctx.followup.send("Updated")
+                        await ctx.followup.send("Updated")
+
+                    else:
+                        await ctx.followup.send(
+                            "Global must be below 100 length in characters"
+                        )
 
                 except Exception as e:
                     logger.log(
